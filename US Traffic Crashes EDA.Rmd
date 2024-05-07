@@ -1,0 +1,439 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+getwd()
+```
+
+
+```{r}
+library(tidyverse)
+library(lubridate)
+traffic_crashes <- read.csv("./Data/Traffic_Crashes.csv")
+
+```
+
+```{r}
+unlist(lapply(traffic_crashes,class))
+```
+
+```{r}
+factor_variables <- c(
+  "TRAFFIC_CONTROL_DEVICE", "DEVICE_CONDITION", "WEATHER_CONDITION",
+  "LIGHTING_CONDITION", "FIRST_CRASH_TYPE", "TRAFFICWAY_TYPE", "ALIGNMENT",
+  "ROADWAY_SURFACE_COND", "ROAD_DEFECT", "REPORT_TYPE", "CRASH_TYPE",
+  "INTERSECTION_RELATED_I", "NOT_RIGHT_OF_WAY_I", "HIT_AND_RUN_I", "DAMAGE",
+  "PRIM_CONTRIBUTORY_CAUSE", "SEC_CONTRIBUTORY_CAUSE", "PHOTOS_TAKEN_I",
+  "STATEMENTS_TAKEN_I", "DOORING_I", "WORK_ZONE_I", "WORK_ZONE_TYPE",
+  "WORKERS_PRESENT_I", "MOST_SEVERE_INJURY", "STREET_DIRECTION", "CRASH_DAY_OF_WEEK", "CRASH_HOUR","CRASH_MONTH"
+)
+
+```
+
+```{r}
+character_variables <- c(
+  "CRASH_RECORD_ID", "CRASH_DATE_EST_I", "STREET_NO",
+  "STREET_NAME", "BEAT_OF_OCCURRENCE"
+)
+```
+
+```{r}
+traffic_crashes <- traffic_crashes %>%
+  mutate(across(all_of(factor_variables), as.factor)) %>%
+  mutate(across(all_of(character_variables), as.character))
+```
+
+```{r}
+#Overview of all variables
+summary <- summary(traffic_crashes)
+```
+
+```{r}
+#Numeric Variables - Summary Statistics
+summary_results <- list()
+
+for (var in names(traffic_crashes)) {
+  if (is.numeric(traffic_crashes[[var]])) {
+    var_summary <- round(as.numeric(summary(traffic_crashes[[var]])), digits = 2)
+    summary_results[[var]] <- as.numeric(var_summary)
+  }
+}
+numeric_summary <- do.call(rbind, summary_results)
+colnames(numeric_summary) <- c("Min.", "Q1",  "Median",  "Mean", "Q3", "Max", "NA Count")
+```
+
+```{r}
+numeric_summary <- as.data.frame(numeric_summary)
+```
+
+```{r}
+numeric_summary <- numeric_summary %>%
+  mutate(
+    IQR = Q3 - Q1
+  )
+```
+
+```{r}
+#Factor Variables - Summary Statistics
+factor_results <- list()
+
+for (var in names(traffic_crashes)) {
+  if (is.factor(traffic_crashes[[var]])) {
+    num_levels <- length(unique(traffic_crashes[[var]]))
+    level_counts <- table(traffic_crashes[[var]])
+    most_frequent_level <- names(which.max(level_counts))
+    most_frequent_count <- level_counts[most_frequent_level]
+    num_missing <- sum(is.na(traffic_crashes[[var]]))
+
+    factor_results[[var]] <- c(
+      num_levels,
+      most_frequent_level,
+      most_frequent_count,
+      num_missing
+    )
+  }
+}
+
+factor_summary <- do.call(rbind, factor_results)
+
+colnames(factor_summary) <- c("Unique", "Most Frequent",  "Most Frequent Count", "NA Count")
+```
+
+```{r}
+factor_summary <- as.data.frame(factor_summary)
+```
+
+```{r}
+#Character Variables - Summary Statistics
+character_results <- list()
+
+for (var in names(traffic_crashes)) {
+  if (is.character(traffic_crashes[[var]])) {
+
+    unique_count <- length(unique(traffic_crashes[[var]]))
+    most_frequent_value <- names(sort(table(traffic_crashes[[var]]), decreasing = TRUE))[1]
+    most_frequent_freq <- max(table(traffic_crashes[[var]]))
+    num_missing <- sum(is.na(traffic_crashes[[var]]))
+
+    character_results[[var]] <- c(
+      unique_count,
+      most_frequent_value,
+      most_frequent_freq,
+      num_missing
+    )
+  }
+}
+
+character_summary <- do.call(rbind, character_results)
+
+colnames(character_summary) <- c("Unique", "Most Frequent","Most Frequent Count","NA Count")
+```
+
+```{r}
+character_summary <- as.data.frame(character_summary)
+```
+
+```{r}
+char_fact <- rbind(factor_summary,character_summary)
+```
+
+```{r}
+char_fact
+```
+
+```{r}
+numeric_summary
+```
+
+```{r}
+names(traffic_crashes)
+```
+
+
+#EDA
+
+#parsing the dates
+```{r}
+traffic_crashes1 <- read.csv("./Data/Traffic_Crashes.csv")
+
+traffic_crashes1 <- traffic_crashes1 %>% mutate(
+  date = parse_date_time(CRASH_DATE, orders = "%m/%d/%Y %I:%M:%s %p"),
+  year = str_match(date,  "(\\d+)")[,-2],
+  time = str_match(date, "\\d+-\\d+-\\d+ (\\d+:\\d+:\\d+)")[,2]) %>% 
+  select(CRASH_DATE, date, year, time, everything())
+traffic_crashes1
+
+traffic_crashes1 <- traffic_crashes1 %>% filter(
+  date >= "2017-09-01"
+) 
+
+traffic_crashes2 <- traffic_crashes1 %>% filter(year >= 2018 & year <= 2023)
+
+traffic_crashes_2023 <- traffic_crashes1 %>% 
+  filter(year == 2023)
+
+```
+
+
+# 1. Distribution of crashes across hours
+#Findings: A higher proportion of crashes occurred between 3pm-5pm compared to other times
+```{r}
+traffic_crashes2 <- traffic_crashes2 %>%
+  mutate(new_hour = if_else(CRASH_HOUR < 5, CRASH_HOUR + 24, CRASH_HOUR),
+         DOF_TYPE = if_else(CRASH_DAY_OF_WEEK %in% c(6, 7), "weekend (fri, sat)", "weekday (sun, mon, tue, wed, thu)"),
+         wday = wday(CRASH_DAY_OF_WEEK, label = T)
+  )
+
+traffic_crashes2 %>% 
+  group_by(CRASH_HOUR) %>% 
+  summarise(n = n()) %>% 
+  mutate(prop = n/sum(n)) %>% 
+  arrange(desc(n))
+```
+
+```{r}
+
+traffic_crashes2 %>%
+  ggplot() +
+  geom_bar(aes(x = new_hour, fill = factor(new_hour %in% c(15:17)))) +
+  scale_fill_manual(values = c("FALSE" = "darkgrey", "TRUE" = "blue")) +
+  scale_x_continuous(breaks = seq(5, 28, by = 1), labels = c("5am", "6am", "7am", "8am", "9am", "10am", "11am", "12pm", "1pm", "2pm", "3pm", "4pm", "5pm", "6pm", "7pm", "8pm", "9pm", "10pm", "11pm", "12am", "1am", "2am", "3am", "4am")) +
+  labs(
+    title = "Distribution of crashes per hour",
+    subtitle = "A higher proportion of crashes occurred between 3pm-5pm compared to other times",
+    x = "Hour of Day"
+  ) + 
+  theme(legend.position  = "none",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+#2. What are the patterns around the crashes and the days of the week?
+#Findings: A higher number of crashes take place on Friday, followed by Saturday
+
+```{r}
+traffic_crashes2 %>% 
+  group_by(wday(CRASH_DAY_OF_WEEK, label = T)) %>% 
+  summarise(n = n()) %>% 
+  mutate(prop = n/sum(n)) %>% 
+  arrange(desc(n))
+```
+
+```{r}
+traffic_crashes2 %>%
+  ggplot() +
+  geom_bar(aes(wday(CRASH_DAY_OF_WEEK, label = T, week_start = 1), fill = factor(CRASH_DAY_OF_WEEK %in% c(7, 1))), width = 0.7, stat = "count") +
+  geom_bar(data = subset(traffic_crashes2, wday(CRASH_DAY_OF_WEEK) == 6),
+           aes(wday(CRASH_DAY_OF_WEEK, label = T, week_start = 1)), fill = "transparent", color = "black", size =1, width = 0.7, stat = "count") +
+  scale_y_continuous(breaks = seq(0, 140000, by = 10000)) +
+  labs(x = "Day of the Week") +
+  theme(legend.position = "none")
+```
+
+#3. What patterns are there for the time of day according to if it is a weekend or a weekday?
+#Findings: Crashes are higher during the weekend particuarly between 7pm to 4am. Crashes are higher for the weekday between 5am to 11am and between 1pm and 7pm
+
+```{r}
+traffic_crashes3 <- traffic_crashes2 %>%
+  mutate(new_hour = if_else(CRASH_HOUR < 5, CRASH_HOUR + 24, CRASH_HOUR),
+         DOF_TYPE = if_else(CRASH_DAY_OF_WEEK %in% c(7,1), "weekend (sat, sun)", "weekday (mon, tue, wed, thu, fri)"),
+         wday = wday(CRASH_DAY_OF_WEEK, label = T)
+  ) 
+
+#Calculate densities manually for each DOF_TYPE group
+density_weekday3 <- with(subset(traffic_crashes3, DOF_TYPE == "weekday (mon, tue, wed, thu, fri)"),
+                        density(new_hour, bw = 1))
+density_weekend3 <- with(subset(traffic_crashes3, DOF_TYPE == "weekend (sat, sun)"),
+                        density(new_hour, bw = 1))
+
+# Convert to data frames
+df_weekday3 <- data.frame(x = density_weekday3$x, y = density_weekday3$y, DOF_TYPE = "weekday (mon, tue, wed, thu, fri)")
+df_weekend3 <- data.frame(x = density_weekend3$x, y = density_weekend3$y, DOF_TYPE = "weekend (sat, sun)")
+
+#Merge and calculate where weekend density is above weekday density
+density_diff3 <- merge(df_weekday3, df_weekend3, by = "x", suffixes = c("_weekday", "_weekend"))
+
+density_diff3 <- density_diff3 %>%
+  mutate(y_diff = y_weekday - y_weekend,
+         fill = ifelse(y_diff > 0, 1, 0))  # 1 where weekday > weekend
+
+# Plot with shading
+traffic_crashes3 %>% ggplot() +
+  geom_line(data = df_weekday3, aes(x = x, y = y, color = "Weekday"), size = 1) +
+  geom_line(data = df_weekend3, aes(x = x, y = y, color = "Weekend"), size = 1) +
+  geom_ribbon(data = density_diff3, aes(x = x, ymin = 0, ymax = ifelse(fill == 1, y_weekday, 0), fill = "Weekday > Weekend"), alpha = 0.2) +
+  scale_x_continuous(limits = c(5, 28),
+    breaks = seq(5, 28, by = 1), labels = c("5am", "6am", "7am", "8am", "9am", "10am", "11am", "12pm", "1pm", "2pm", "3pm", "4pm", "5pm", "6pm", "7pm", "8pm", "9pm", "10pm", "11pm", "12am", "1am", "2am", "3am", "4am")) +
+  scale_y_continuous(limits = c(0, 0.08)) +
+  scale_color_manual(values = c("#F8766D", "#00BFC4"), name = NULL) +
+  scale_fill_manual(values = c("#F8766D"), name = NULL, guide = "none") +
+  theme(legend.position = "top",
+        axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(
+    x = "Hour of Day",
+    y = "Proportion of Crashes",
+    title = "Proportion of Crashes by Hour of the Day and Type of Weekday"
+  )
+```
+
+# 4a. At what speed do most crashes occur?
+# A large majoirty of the crashes recorded (74%) have been posted by the attending police office at a speed of 30
+
+```{r}
+traffic_crashes2 %>% group_by(POSTED_SPEED_LIMIT) %>% 
+  summarise(n = n()) %>% 
+  mutate(prop = round(n / sum(n) * 100,1)) %>% 
+  arrange(desc(n))
+```
+
+#4b. What is the distribution of crashes excluding 30?
+# speed limit of 30 has been excluded as it makes up 74% of the crashes and hence makes it difficult to observe any patterns among the other reported speeds
+
+#Findings: The number of crashes tend to increase as the speed limit increases up to 35, however the rate of crashes declines after this 
+
+#**** wanted to add a trend line just from 0 to 35 but can't figure it out ****
+
+```{r}
+traffic_crashes2 %>% group_by(POSTED_SPEED_LIMIT) %>% 
+  filter(POSTED_SPEED_LIMIT != 30) %>% 
+  summarise(n = n()) %>% 
+  mutate(prop = round(n / sum(n) * 100,1)) %>% 
+  arrange(desc(n))
+```
+
+
+```{r}
+traffic_crashes2 <- traffic_crashes2 %>% 
+  mutate(
+    speed_range = cut_width(POSTED_SPEED_LIMIT, width = 5, start = 0, boundary = 0))
+
+traffic_crashes2 %>% 
+  group_by(speed_range) %>% 
+  summarise(n = n()) %>% 
+  ggplot(aes(x = as.numeric(speed_range), y = n)) + 
+  geom_point(size = 3) +
+  geom_vline(xintercept = 7.5, color = "black", linetype = "dashed") +
+  scale_y_continuous(limits = c(0, 50000)) +
+  scale_x_continuous(breaks = as.numeric(unique(traffic_crashes2_level$speed_range)),
+                     labels = unique(traffic_crashes2_level$speed_range)) +
+  labs(title = "Traffic Crashes against Speed Limit", x = "Speed Range", y = "Count")
+
+ 
+```
+
+```{r}
+traffic_crashes2 %>% 
+  filter(POSTED_SPEED_LIMIT != 30) %>% 
+  mutate(
+    speed_range = cut_width(POSTED_SPEED_LIMIT, width = 5, start = 0, boundary = 0)) %>% 
+  group_by(speed_range) %>% 
+  summarise(n = n()) %>% 
+  mutate(prop = round(n/sum(n), 3),
+         cumulative_prop = cumsum(prop)) %>% 
+  arrange(speed_range)
+```
+
+#5. What type of trafficway do crashes from speeds above 35 take place? does this differ from crashes below 35?
+#Findings: most of the crashes, 63% of crashes with a speed above 35 occur under the Trafficway type: Divided - W/Median Barrier, whereas this is only 4% for speeds under 35. The majority Trafficway type for speeds under 35 at 44% is Non Divided.
+
+```{r}
+traffic_crashes2_speedplus35 <- traffic_crashes2 %>%
+  filter(POSTED_SPEED_LIMIT > 35) %>% 
+  group_by(TRAFFICWAY_TYPE) %>% 
+  summarise(n = n()) %>%
+  ungroup() %>%  
+  mutate(prop = round(n / sum(n), 2))
+traffic_crashes2_speedplus35
+
+traffic_crashes2_speedless35 <- traffic_crashes2 %>%
+  filter(POSTED_SPEED_LIMIT <= 35) %>% 
+  group_by(TRAFFICWAY_TYPE) %>% 
+  summarise(n = n()) %>%
+  ungroup() %>%  
+  mutate(prop = round(n / sum(n),2))
+traffic_crashes2_speedless35
+
+traffic_crashes2_speedplus35 %>% right_join(traffic_crashes2_speedless35, by = "TRAFFICWAY_TYPE", suffix = c("_above_35", "_below_35")) %>% 
+  arrange(desc(prop_above_35)) %>% 
+  select(TRAFFICWAY_TYPE, prop_above_35, prop_below_35)
+
+```
+
+#6. What is the split of crash type for each speed limit range
+#Like the previous question, the range is limited to reduce the skew from the numerous values from a speed limit of 30
+
+#Findings: Across all speed ranges, most of the crashes caused no injury or required the car to be towed. However, the chart indicates that the proportion of crashes that did result in injury and/or towing increases as the speed increases - this is explored in the next question
+
+```{r}
+traffic_crashes2 %>% 
+  ggplot(aes(x = speed_range, fill = CRASH_TYPE)) + 
+  geom_bar() +
+  coord_cartesian(ylim = c(0, 50000)) +
+  theme(
+    legend.position = "top",
+    legend.title = element_blank()
+  )
+
+```
+#7. How does the proportion of serious crashes differ as the speed increases?
+#Findings: The proportion of crashes resulting in injury and/or car towing increases as the speed increases up to a speed limit of 50, however starts to decrease as the speed range increases above 50
+
+```{r}
+traffic_crashes2_level <- traffic_crashes2 %>%
+  group_by(speed_range, CRASH_TYPE) %>%
+  summarise(n = n(),
+                .groups = "drop") %>%
+  pivot_wider(names_from = CRASH_TYPE, values_from = n) %>%
+  mutate(
+    total = `INJURY AND / OR TOW DUE TO CRASH` + `NO INJURY / DRIVE AWAY`,
+    prop_serious = `INJURY AND / OR TOW DUE TO CRASH` / total
+  )
+traffic_crashes2_level
+
+traffic_crashes2_level %>%
+  ggplot(aes(x = as.numeric(speed_range), y = prop_serious)) +
+  geom_point(size = 3) +
+  geom_smooth(method = "lm", formula = y ~ poly(x, 2), se = F) +
+  labs(title = "Proportion of Crash Seriousness Compared to Speed", x = "Speed Range", y = "Proportion") +
+  scale_x_continuous(breaks = as.numeric(unique(traffic_crashes2_level$speed_range)),
+                     labels = unique(traffic_crashes2_level$speed_range))
+```
+
+#8. What is the distribution between the device condition and the number of crashes?
+#Findings: Most of the crashes occur where there are no controls present, however, among the devices which are present, the condition tends to be functioning properly
+
+```{r}
+traffic_crashes1 %>% 
+  group_by(DEVICE_CONDITION) %>% 
+  summarise(n = n()) %>% 
+  mutate(prop = n/sum(n)) %>% 
+  arrange(desc(n))
+```
+
+
+```{r}
+traffic_crashes1 %>% 
+  group_by(DEVICE_CONDITION) %>% 
+  summarise(n = n()) %>% 
+  arrange(n) %>% 
+  mutate(DEVICE_CONDITION = factor(DEVICE_CONDITION, levels = DEVICE_CONDITION)) %>% 
+  ggplot() +
+  geom_col(aes(x = DEVICE_CONDITION, y = n, fill = "same_color")) +
+  coord_flip() +
+  scale_fill_manual(values = "skyblue")
+```
+#9. Out of the devices that are functioning properly, what type of devices are used and what pattern do they have with the number of crashes?
+#Findings: The main traffic control device present in these cases is the Traffic Signal (Traffic Light), 73%, followed by the Stop Sign/Flasher, 23%, hence the majority of these crashes occur at Traffic Light and Stop Sign Controls 
+```{r}
+options(scipen = 999)
+
+traffic_crashes1 %>% 
+  filter(DEVICE_CONDITION == "FUNCTIONING PROPERLY") %>% 
+  group_by(TRAFFIC_CONTROL_DEVICE) %>% 
+  summarise(n = n()) %>% 
+  mutate(prop = round(n/sum(n),2)) %>% 
+  arrange(desc(n))
+```
+
